@@ -877,6 +877,10 @@ class ViewerState:
         Args:
             graph: current checkpoint of model
         """
+
+        # Hacky fix
+        camera_object["camera_type"] = "perspective"
+
         # Check that timestamp is newer than the last one
         if int(camera_object["timestamp"]) < self.prev_camera_timestamp:
             return

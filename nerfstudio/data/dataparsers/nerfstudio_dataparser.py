@@ -274,6 +274,9 @@ class Nerfstudio(DataParser):
         assert self.downscale_factor is not None
         cameras.rescale_output_resolution(scaling_factor=1.0 / self.downscale_factor)
 
+        if len(mask_filenames) > 0:
+            print("Using masks")
+
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
             cameras=cameras,
