@@ -140,14 +140,26 @@ class InstantNGP(DataParser):
             camera_to_worlds=camera_to_world,
             camera_type=camera_type,
         )
+        
+        if "use_alpha_channel" in meta:
+            use_alpha_channel = bool(meta["use_alpha_channel"])
+        else:
+            use_alpha_channel = False
+            
+        # NOTE: Testing only
+        use_alpha_channel = True
 
         # TODO(ethan): add alpha background color
         dataparser_outputs = DataparserOutputs(
             image_filenames=image_filenames,
             cameras=cameras,
+            use_alpha_channel=use_alpha_channel,
             scene_box=scene_box,
             mask_filenames=mask_filenames if len(mask_filenames) > 0 else None,
             dataparser_scale=self.config.scene_scale,
+            metadata={
+                "use_alpha_channel": use_alpha_channel,
+            }
         )
 
         return dataparser_outputs

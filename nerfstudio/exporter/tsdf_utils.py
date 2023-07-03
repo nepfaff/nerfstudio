@@ -172,7 +172,7 @@ class TSDF:
 
     def integrate_tsdf(
         self,
-        c2w: Float[Tensor, "batch 4 4"],
+        cam2worlds: Float[Tensor, "batch 4 4"],
         K: Float[Tensor, "batch 3 3"],
         depth_images: Float[Tensor, "batch 1 height width"],
         color_images: Optional[Float[Tensor, "batch 3 height width"]] = None,
@@ -181,7 +181,7 @@ class TSDF:
         """Integrates a batch of depth images into the TSDF.
 
         Args:
-            c2w: The camera extrinsics.
+            cam2worlds: The camera extrinsics.
             K: The camera intrinsics.
             depth_images: The depth images to integrate.
             color_images: The color images to integrate.
@@ -191,7 +191,7 @@ class TSDF:
         if mask_images is not None:
             raise NotImplementedError("Mask images are not supported yet.")
 
-        batch_size = c2w.shape[0]
+        batch_size = cam2worlds.shape[0]
         shape = self.voxel_coords.shape[1:]
 
         # Project voxel_coords into image space...
@@ -208,7 +208,7 @@ class TSDF:
         voxel_world_coords = voxel_world_coords.unsqueeze(0)  # [1, 4, N]
         voxel_world_coords = voxel_world_coords.expand(batch_size, *voxel_world_coords.shape[1:])  # [batch, 4, N]
 
-        voxel_cam_coords = torch.bmm(torch.inverse(c2w), voxel_world_coords)  # [batch, 4, N]
+        voxel_cam_coords = torch.bmm(torch.inverse(cam2worlds), voxel_world_coords)  # [batch, 4, N]
 
         # flip the z axis
         voxel_cam_coords[:, 2, :] = -voxel_cam_coords[:, 2, :]
@@ -323,6 +323,25 @@ def export_tsdf_mesh(
     tsdf.to(device)
 
     cameras = dataparser_outputs.cameras
+    # world2cams = np.load("exports/tmp/tsdf_cam_poses.npy")
+    # cam2worlds = np.linalg.inv(world2cams)
+    # cam2worlds[:, 0:3, 2] *= -1  # flip the y and z axis
+    # cam2worlds[:, 0:3, 1] *= -1
+    # cam2worlds = cam2worlds[:, [1, 0, 2, 3], :]  # swap y and z
+    # cam2worlds[:, 2, :] *= -1  # flip whole world upside down
+    # # cam2worlds[:, :3, 3] *= 0.3333 # Scale cameras with scene scale
+    # cameras.camera_to_worlds = torch.tensor(cam2worlds[:,:3,:]).to(cameras.fx)
+    # cameras.fx = cameras.fx[0].repeat(len(world2cams),1).to(cameras.fy)
+    # cameras.fy = cameras.fy[0].repeat(len(world2cams),1).to(cameras.fx)
+    # cameras.cx = cameras.cx[0].repeat(len(world2cams),1).to(cameras.fx)
+    # cameras.cy = cameras.cy[0].repeat(len(world2cams),1).to(cameras.fx)
+    # cameras.width = cameras.width[0].repeat(len(world2cams),1).to(cameras.fx)
+    # cameras.height = cameras.height[0].repeat(len(world2cams),1).to(cameras.fx)
+    # if cameras.distortion_params is not None:
+    #     cameras.distortion_params = cameras.distortion_params[0].repeat(len(world2cams),6).to(cameras.fx)
+    # cameras.camera_type = cameras.camera_type[0].repeat(len(world2cams),1).to(cameras.fx)
+    # cameras.__post_init__()
+
     # we turn off distortion when populating the TSDF
     color_images, depth_images = render_trajectory(
         pipeline,
@@ -334,18 +353,18 @@ def export_tsdf_mesh(
     )
 
     # camera extrinsics and intrinsics
-    c2w: Float[Tensor, "N 3 4"] = cameras.camera_to_worlds.to(device)
-    # make c2w homogeneous
-    c2w = torch.cat([c2w, torch.zeros(c2w.shape[0], 1, 4, device=device)], dim=1)
-    c2w[:, 3, 3] = 1
+    cam2worlds: Float[Tensor, "N 3 4"] = cameras.camera_to_worlds.to(device)
+    # make cam2worlds homogeneous
+    cam2worlds = torch.cat([cam2worlds, torch.zeros(cam2worlds.shape[0], 1, 4, device=device)], dim=1)
+    cam2worlds[:, 3, 3] = 1
     K: Float[Tensor, "N 3 3"] = cameras.get_intrinsics_matrices().to(device)
     color_images = torch.tensor(np.array(color_images), device=device).permute(0, 3, 1, 2)  # shape (N, 3, H, W)
     depth_images = torch.tensor(np.array(depth_images), device=device).permute(0, 3, 1, 2)  # shape (N, 1, H, W)
 
     CONSOLE.print("Integrating the TSDF")
-    for i in range(0, len(c2w), batch_size):
+    for i in range(0, len(cam2worlds), batch_size):
         tsdf.integrate_tsdf(
-            c2w[i : i + batch_size],
+            cam2worlds[i : i + batch_size],
             K[i : i + batch_size],
             depth_images[i : i + batch_size],
             color_images=color_images[i : i + batch_size],

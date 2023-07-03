@@ -110,10 +110,18 @@ class MipNerfModel(Model):
         # First pass:
         field_outputs_coarse = self.field.forward(ray_samples_uniform)
         weights_coarse = ray_samples_uniform.get_weights(field_outputs_coarse[FieldHeadNames.DENSITY])
+        # rgb_coarse = self.renderer_rgb(
+        #     rgb=field_outputs_coarse[FieldHeadNames.RGB],
+        #     weights=weights_coarse,
+        # )
+        if self.kwargs["metadata"].get("use_alpha_channel", False) and self.training:
+            background_color = torch.rand((1, 3))
+        else:
+            background_color = None
         rgb_coarse = self.renderer_rgb(
-            rgb=field_outputs_coarse[FieldHeadNames.RGB],
-            weights=weights_coarse,
+            rgb=field_outputs_coarse[FieldHeadNames.RGB], weights=weights_coarse, background_color=background_color,
         )
+        
         accumulation_coarse = self.renderer_accumulation(weights_coarse)
         depth_coarse = self.renderer_depth(weights_coarse, ray_samples_uniform)
 
@@ -123,9 +131,16 @@ class MipNerfModel(Model):
         # Second pass:
         field_outputs_fine = self.field.forward(ray_samples_pdf)
         weights_fine = ray_samples_pdf.get_weights(field_outputs_fine[FieldHeadNames.DENSITY])
+        # rgb_fine = self.renderer_rgb(
+        #     rgb=field_outputs_fine[FieldHeadNames.RGB],
+        #     weights=weights_fine,
+        # )
+        if self.kwargs["metadata"].get("use_alpha_channel", False) and self.training:
+            background_color = torch.rand((1, 3))
+        else:
+            background_color = None
         rgb_fine = self.renderer_rgb(
-            rgb=field_outputs_fine[FieldHeadNames.RGB],
-            weights=weights_fine,
+            rgb=field_outputs_fine[FieldHeadNames.RGB], weights=weights_fine, background_color=background_color,
         )
         accumulation_fine = self.renderer_accumulation(weights_fine)
         depth_fine = self.renderer_depth(weights_fine, ray_samples_pdf)
@@ -142,8 +157,13 @@ class MipNerfModel(Model):
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
         image = batch["image"].to(self.device)
-        rgb_loss_coarse = self.rgb_loss(image, outputs["rgb_coarse"])
-        rgb_loss_fine = self.rgb_loss(image, outputs["rgb_fine"])
+        if outputs.get("background_color", None) is not None and image.shape[-1] == 4:
+            background_color = outputs["background_color"].to(image.device)
+            image_ = image[:, :3] * image[:, 3:] + background_color * (1 - image[:, 3:])
+        else:
+            image_ = image[:, :3]
+        rgb_loss_coarse = self.rgb_loss(image_, outputs["rgb_coarse"])
+        rgb_loss_fine = self.rgb_loss(image_, outputs["rgb_fine"])
         loss_dict = {"rgb_loss_coarse": rgb_loss_coarse, "rgb_loss_fine": rgb_loss_fine}
         loss_dict = misc.scale_dict(loss_dict, self.config.loss_coefficients)
         return loss_dict
@@ -152,9 +172,9 @@ class MipNerfModel(Model):
         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
     ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
         assert self.config.collider_params is not None, "mip-NeRF requires collider parameters to be set."
-        image = batch["image"].to(outputs["rgb_coarse"].device)
-        rgb_coarse = outputs["rgb_coarse"]
-        rgb_fine = outputs["rgb_fine"]
+        image = batch["image"].to(outputs["rgb_coarse"].device)[..., :3]
+        rgb_coarse = outputs["rgb_coarse"][..., :3]
+        rgb_fine = outputs["rgb_fine"][..., :3]
         acc_coarse = colormaps.apply_colormap(outputs["accumulation_coarse"])
         acc_fine = colormaps.apply_colormap(outputs["accumulation_fine"])
 

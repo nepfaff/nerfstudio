@@ -197,11 +197,18 @@ class NGPModel(Model):
         )[0]
         weights = weights[..., None]
 
+        # rgb = self.renderer_rgb(
+        #     rgb=field_outputs[FieldHeadNames.RGB],
+        #     weights=weights,
+        #     ray_indices=ray_indices,
+        #     num_rays=num_rays,
+        # )
+        if self.kwargs["metadata"].get("use_alpha_channel", False) and self.training:
+            background_color = torch.rand((1, 3))
+        else:
+            background_color = None
         rgb = self.renderer_rgb(
-            rgb=field_outputs[FieldHeadNames.RGB],
-            weights=weights,
-            ray_indices=ray_indices,
-            num_rays=num_rays,
+            rgb=field_outputs[FieldHeadNames.RGB], weights=weights, background_color=background_color, ray_indices=ray_indices, num_rays=num_rays,
         )
         depth = self.renderer_depth(
             weights=weights, ray_samples=ray_samples, ray_indices=ray_indices, num_rays=num_rays
@@ -219,13 +226,18 @@ class NGPModel(Model):
     def get_metrics_dict(self, outputs, batch):
         image = batch["image"].to(self.device)
         metrics_dict = {}
-        metrics_dict["psnr"] = self.psnr(outputs["rgb"], image)
+        metrics_dict["psnr"] = self.psnr(outputs["rgb"], image[:, :3])
         metrics_dict["num_samples_per_batch"] = outputs["num_samples_per_ray"].sum()
         return metrics_dict
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
         image = batch["image"].to(self.device)
-        rgb_loss = self.rgb_loss(image, outputs["rgb"])
+        if outputs.get("background_color", None) is not None and image.shape[-1] == 4:
+            background_color = outputs["background_color"].to(image.device)
+            image_ = image[:, :3] * image[:, 3:] + background_color * (1 - image[:, 3:])
+        else:
+            image_ = image[:, :3]
+        rgb_loss = self.rgb_loss(image_, outputs["rgb"])
         loss_dict = {"rgb_loss": rgb_loss}
         return loss_dict
 
